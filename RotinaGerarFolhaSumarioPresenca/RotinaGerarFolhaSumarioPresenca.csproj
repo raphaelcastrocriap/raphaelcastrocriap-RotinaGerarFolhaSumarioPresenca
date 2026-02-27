@@ -5,6 +5,27 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AssemblyName>RotinaGerarFolhaSumarioPresenca</AssemblyName>
+    <RootNamespace>RotinaGerarFolhaSumarioPresenca</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- SQL Server (moderno, substitui System.Data.SqlClient) -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.*" />
+
+    <!-- MySQL — usado para Moodle e CRM -->
+    <PackageReference Include="MySqlConnector" Version="2.*" />
+
+    <!-- Configuração via appsettings.json -->
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.*" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Copiar appsettings.json para a pasta de saída -->
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 
 </Project>
