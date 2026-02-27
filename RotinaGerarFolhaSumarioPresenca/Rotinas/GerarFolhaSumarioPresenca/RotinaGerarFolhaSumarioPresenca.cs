@@ -35,7 +35,7 @@ public class GerarFolhaPresencaRotina
     //    O appsettings.json contém apenas infraestrutura.
     //    Sempre que ModoTeste estar true, os emails são redirecionados para EmailModoTeste e API SV aponta para localhost.
     // ══════════════════════════════════════════════════════════════════════════
-    private const bool   ModoTeste          = true;          // true → emails só para EmailTeste + API local
+    private const bool   ModoTeste          = false;          // true → emails só para EmailTeste + API local
     private const string DataFiltroOverride = "";             // "" = ontem (dia anterior) | "2026-01-10" = data fixa para teste
     private const string EmailInformatica   = "informatica@criap.com";
     private const string EmailPedagogico    = "tecnicopedagogico@criap.com";
@@ -381,11 +381,17 @@ public class GerarFolhaPresencaRotina
             corpo.AppendLine($"<h3 style='font-size:13px;color:#555;'>Log de Execu&ccedil;&atilde;o</h3>");
             corpo.AppendLine(logHtml);
 
+            // Assembly.Location é vazio em publicações single-file; usa o caminho do processo.
+            var exePath   = Environment.ProcessPath ?? typeof(GerarFolhaPresencaRotina).Assembly.Location;
+            var buildDate = !string.IsNullOrEmpty(exePath)
+                ? File.GetLastWriteTime(exePath).ToString("dd/MM/yyyy HH:mm")
+                : "N/A";
+
             string html = _email.ConstruirLayoutHtml(
                 titulo         : $"Relat&oacute;rio F029 &mdash; Sess&otilde;es de {dataFmt}",
                 conteudo       : corpo.ToString(),
                 rodapeInterno  : true,
-                versao         : $"v{VERSAO} | {NOME_ROTINA} | Build: {File.GetLastWriteTime(typeof(GerarFolhaPresencaRotina).Assembly.Location):dd/MM/yyyy HH:mm}");
+                versao         : $"v{VERSAO} | {NOME_ROTINA} | Build: {buildDate}");
 
             
             _email.EnviarEmail(
@@ -438,7 +444,7 @@ public class GerarFolhaPresencaRotina
             _logger.Aviso($"DataFiltroOverride ativo: usando {overrideDate:dd/MM/yyyy} em vez de ontem.");
             return overrideDate.Date;
         }
-        return DateTime.Today.AddDays(-1);
+        return DateTime.Today;
     }
 
     /// <summary>Converte "19:00:00", "19:00" ou datetime completo em "19h00".</summary>
