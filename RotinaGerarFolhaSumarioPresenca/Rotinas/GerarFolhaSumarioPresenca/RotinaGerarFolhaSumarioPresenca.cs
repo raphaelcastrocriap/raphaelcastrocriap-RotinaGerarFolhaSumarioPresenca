@@ -29,6 +29,10 @@ public class GerarFolhaPresencaRotina
     // ── Endpoint da API ───────────────────────────────────────────────────────
     private const string API_ENDPOINT = "/api/v2/acoes-dtp/gerar-f029-preenchido";
 
+    // ── Retry para erros transientes da API (ex: Puppeteer crash) ─────────────
+    private const int    API_MAX_TENTATIVAS   = 3;    // total de tentativas (1 original + 2 retries)
+    private const int    API_DELAY_RETRY_MS   = 6000; // espera entre tentativas (ms)
+
     // ══════════════════════════════════════════════════════════════════════════
     //  CONSTANTES DE DESENVOLVIMENTO
     //  ► Únicas variáveis que devem ser alteradas para testes/desenvolvimento.
@@ -235,55 +239,118 @@ public class GerarFolhaPresencaRotina
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    //  CHAMADA À API
+    //  CHAMADA À API  (com retry para erros transientes de Puppeteer)
     // ══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Erros que indicam crash transiente do browser Puppeteer/Chromium na API.
+    /// Nestas situações vale a pena repetir a chamada.
+    /// </summary>
+    private static readonly string[] ErrrosTransientesApi =
+    [
+        "Target closed",
+        "Protocol error",
+        "WebSocket",
+        "Session closed",
+        "Connection closed",
+        "close handshake"
+    ];
+
+    private static bool ContemErroTransiente(string? texto) =>
+        !string.IsNullOrWhiteSpace(texto) &&
+        ErrrosTransientesApi.Any(k => texto.Contains(k, StringComparison.OrdinalIgnoreCase));
+
+    private static bool RespostaTemErroTransiente(GerarFolhaApiResponse? resp)
+    {
+        if (resp is null) return false;
+        if (ContemErroTransiente(resp.Mensagem)) return true;
+        return resp.Sessoes.Any(s => !s.Sucesso && ContemErroTransiente(s.MensagemErro));
+    }
+
     private async Task<GerarFolhaApiResponse?> ChamarApiAsync(string refAccao, List<int> rowIds)
     {
-        try
+        GerarFolhaApiResponse? ultimaResposta = null;
+
+        for (int tentativa = 1; tentativa <= API_MAX_TENTATIVAS; tentativa++)
         {
-            var body = new GerarFolhaApiRequest
+            if (tentativa > 1)
             {
-                RefAcao       = refAccao,
-                RowIdsSessoes = rowIds
-            };
-
-            string json    = JsonSerializer.Serialize(body);
-            var    content = new StringContent(json, Encoding.UTF8, "application/json");
-
-            _logger.Info($"  POST {API_ENDPOINT} | RefAccao={refAccao} | {rowIds.Count} sessão(ões)");
-
-            HttpResponseMessage httpResp = await _http.PostAsync(API_ENDPOINT, content);
-            string              respBody = await httpResp.Content.ReadAsStringAsync();
-
-            if (httpResp.IsSuccessStatusCode)
-            {
-                var apiResp = JsonSerializer.Deserialize<GerarFolhaApiResponse>(respBody,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                return apiResp;
+                _logger.Aviso($"  [Retry {tentativa - 1}/{API_MAX_TENTATIVAS - 1}] Aguardando {API_DELAY_RETRY_MS / 1000}s antes de repetir para '{refAccao}'...");
+                await Task.Delay(API_DELAY_RETRY_MS);
             }
 
-            return new GerarFolhaApiResponse
+            try
             {
-                Sucesso  = false,
-                Mensagem = $"HTTP {(int)httpResp.StatusCode}: {respBody}"
-            };
-        }
-        catch (TaskCanceledException)
-        {
-            return new GerarFolhaApiResponse
+                var body = new GerarFolhaApiRequest
+                {
+                    RefAcao       = refAccao,
+                    RowIdsSessoes = rowIds
+                };
+
+                string json    = JsonSerializer.Serialize(body);
+                var    content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                _logger.Info($"  POST {API_ENDPOINT} | RefAccao={refAccao} | {rowIds.Count} sessão(ões) [tentativa {tentativa}/{API_MAX_TENTATIVAS}]");
+
+                HttpResponseMessage httpResp = await _http.PostAsync(API_ENDPOINT, content);
+                string              respBody = await httpResp.Content.ReadAsStringAsync();
+
+                if (httpResp.IsSuccessStatusCode)
+                {
+                    var apiResp = JsonSerializer.Deserialize<GerarFolhaApiResponse>(respBody,
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                    ultimaResposta = apiResp;
+
+                    // Se houve erros transientes de Puppeteer e ainda há tentativas, repetir
+                    if (RespostaTemErroTransiente(apiResp) && tentativa < API_MAX_TENTATIVAS)
+                    {
+                        var errosTransientes = apiResp!.Sessoes
+                            .Where(s => !s.Sucesso && ContemErroTransiente(s.MensagemErro))
+                            .Select(s => s.MensagemErro)
+                            .FirstOrDefault() ?? apiResp.Mensagem;
+                        _logger.Aviso($"  Erro transiente detectado (Puppeteer): '{errosTransientes}'. Será repetido.");
+                        continue;
+                    }
+
+                    return apiResp;
+                }
+
+                ultimaResposta = new GerarFolhaApiResponse
+                {
+                    Sucesso  = false,
+                    Mensagem = $"HTTP {(int)httpResp.StatusCode}: {respBody}"
+                };
+
+                // Não repetir para erros HTTP 4xx (não são transientes)
+                if ((int)httpResp.StatusCode < 500)
+                    return ultimaResposta;
+            }
+            catch (TaskCanceledException)
             {
-                Sucesso  = false,
-                Mensagem = $"Timeout ao chamar a API (>{_cfg.Api.TimeoutSeconds}s)"
-            };
-        }
-        catch (Exception ex)
-        {
-            return new GerarFolhaApiResponse
+                ultimaResposta = new GerarFolhaApiResponse
+                {
+                    Sucesso  = false,
+                    Mensagem = $"Timeout ao chamar a API (>{_cfg.Api.TimeoutSeconds}s)"
+                };
+            }
+            catch (Exception ex)
             {
-                Sucesso  = false,
-                Mensagem = $"Exceção ao chamar API: {ex.Message}"
-            };
+                ultimaResposta = new GerarFolhaApiResponse
+                {
+                    Sucesso  = false,
+                    Mensagem = $"Exceção ao chamar API: {ex.Message}"
+                };
+            }
         }
+
+        if (ultimaResposta is not null && tentativaFoiRetry(ultimaResposta))
+            _logger.Erro($"  '{refAccao}': todas as {API_MAX_TENTATIVAS} tentativas falharam com erro transiente.");
+
+        return ultimaResposta;
+
+        // helper local
+        bool tentativaFoiRetry(GerarFolhaApiResponse r) => RespostaTemErroTransiente(r) || !r.Sucesso;
     }
 
     // ══════════════════════════════════════════════════════════════════════════
