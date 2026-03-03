@@ -39,7 +39,7 @@ public class GerarFolhaPresencaRotina
     //    O appsettings.json contém apenas infraestrutura.
     //    Sempre que ModoTeste estar true, os emails são redirecionados para EmailModoTeste e API SV aponta para localhost.
     // ══════════════════════════════════════════════════════════════════════════
-    private const bool   ModoTeste          = false;          // true → emails só para EmailTeste + API local
+    private const bool   ModoTeste          = true;          // true → emails só para EmailTeste + API local
     private const string DataFiltroOverride = "";             // "" = ontem (dia anterior) | "2026-01-10" = data fixa para teste
     private const string EmailInformatica   = "informatica@criap.com";
     private const string EmailPedagogico    = "tecnicopedagogico@criap.com";
