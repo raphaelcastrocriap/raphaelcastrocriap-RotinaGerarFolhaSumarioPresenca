@@ -202,6 +202,7 @@ public class GerarFolhaPresencaRotina
             INNER JOIN TBForCursos cu   ON cu.Codigo_Curso = a.Codigo_Curso
             WHERE CAST(s.Data AS DATE) = @dataAlvo
               AND s.Comp_elr = 'P'
+              AND a.Codigo_Estado NOT IN (2,3)
               AND f.Codigo_Formador NOT IN ({excluidos})
               AND COALESCE(c.Email1, c.Email2) IS NOT NULL";
 
